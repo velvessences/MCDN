@@ -1,6 +1,7 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const nodeamf = require('@jadbalout/nodeamf'); // THE CORRECT PACKAGE
 const app = express();
 const PORT = 1600;
 
@@ -12,61 +13,89 @@ app.use((req, res, next) => {
 // 1. Cross-Domain Policy
 app.get('/crossdomain.xml', (req, res) => {
     res.type('text/xml');
-    res.send(`<?xml version="1.0"?>
-    <cross-domain-policy>
-        <allow-access-from domain="*" to-ports="*" />
-    </cross-domain-policy>`);
+    res.send(`<?xml version="1.0"?><cross-domain-policy><allow-access-from domain="*" to-ports="*" /></cross-domain-policy>`);
 });
 
-// 2. The AMF Gateway (Traffic Cop)
+// --- CUSTOM AMF PACKET BUILDER ---
+// Wraps your AMF3 data in an AMF0 packet so the Flash Player's NetConnection accepts it
+function buildAMFPacket(responseId, amf3Data) {
+    const targetUri = responseId + '/onResult';
+    const responseNull = 'null';
+
+    const header = Buffer.alloc(6);
+    header.writeUInt16BE(0, 0); // AMF0 Version
+    header.writeUInt16BE(0, 2); // 0 Headers
+    header.writeUInt16BE(1, 4); // 1 Message
+
+    const tBuf = Buffer.alloc(2 + Buffer.byteLength(targetUri));
+    tBuf.writeUInt16BE(Buffer.byteLength(targetUri), 0);
+    tBuf.write(targetUri, 2);
+
+    const rBuf = Buffer.alloc(2 + Buffer.byteLength(responseNull));
+    rBuf.writeUInt16BE(Buffer.byteLength(responseNull), 0);
+    rBuf.write(responseNull, 2);
+
+    const lBuf = Buffer.alloc(4);
+    lBuf.writeUInt32BE(amf3Data.length + 1, 0); // +1 for the AMF3 marker
+
+    const marker = Buffer.alloc(1);
+    marker.writeUInt8(0x11, 0); // 0x11 tells Flash: "AMF3 Data follows!"
+
+    return Buffer.concat([header, tBuf, rBuf, lBuf, marker, amf3Data]);
+}
+
+// --- THE AMF GATEWAY ---
 app.post('/Gateway.aspx', express.raw({ type: '*/*' }), (req, res) => {
     const method = req.query.method;
-    
-    if (!method) {
-        console.log(`   -> [AMF] Unnamed Flash Remoting Call`);
-        return res.status(200).send();
-    }
+    if (!method) return res.status(200).send();
 
     console.log(`   -> [AMF METHOD]: ${method}`);
 
-    // Look for the script in the /services folder
-    // E.g., looking for "GetAppSettings.js"
-    const scriptName = method.split('.').pop(); // Extracts just the last part of the name
+    // HACK: Quickly extract the Response ID (e.g., "/1", "/2") from the raw binary AMF request
+    const rawString = req.body.toString('utf8');
+    const match = rawString.match(/\/[0-9]+/);
+    const responseId = match ? match[0] : '/1';
+
+    const scriptName = method.split('.').pop(); 
     const scriptPath = path.join(__dirname, 'services', `${scriptName}.js`);
 
     if (fs.existsSync(scriptPath)) {
-        // If the script exists, require it and run it! (Like Roblox require())
         try {
             const handler = require(scriptPath);
-            handler.execute(req, res);
+            const responseData = handler.execute(req); 
+            
+            // 1. Encode the JS object into binary AMF3 using nodeamf
+            const amf3Data = nodeamf.serialize(responseData, nodeamf.ENCODING.AMF3);
+            
+            // 2. Wrap it into the AMF0 Packet with the correct Response ID
+            const finalPacket = buildAMFPacket(responseId, amf3Data);
+
+            res.setHeader('Content-Type', 'application/x-amf');
+            res.status(200).send(finalPacket);
         } catch (error) {
             console.error(`   -> [ERROR] Failed to run ${scriptName}.js:`, error);
             res.status(500).send();
         }
     } else {
-        // If we haven't made the script yet, just ignore it and don't crash
         console.log(`   -> [MISSING SCRIPT]: Create services/${scriptName}.js to handle this!`);
         res.status(200).send();
     }
 });
 
-// 3. User Web Services (SOAP / XML)
+// --- SOAP / XML ---
 app.all(/^\/.*WebService\/User\/UserService\.asmx/i, (req, res) => {
     console.log(`   -> [SOAP SERVICE]: UserService`);
     res.type('text/xml');
-    res.send(`<?xml version="1.0" encoding="utf-8"?>
-    <wsdl:definitions xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/" targetNamespace="http://tempuri.org/">
-        <wsdl:portType name="UserServiceSoap" />
-    </wsdl:definitions>`);
+    res.send(`<?xml version="1.0" encoding="utf-8"?><wsdl:definitions xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/" targetNamespace="http://tempuri.org/"><wsdl:portType name="UserServiceSoap" /></wsdl:definitions>`);
 });
 
-// 4. Catch-All
+// --- CATCH-ALL ---
 app.use((req, res) => {
     res.status(200).send('OK');
 });
 
 app.listen(PORT, () => {
     console.log(`=========================================`);
-    console.log(`🚀 MSP Modular Server running on port ${PORT}`);
+    console.log(`🚀 MSP AMF Gateway running on port ${PORT}`);
     console.log(`=========================================`);
 });
