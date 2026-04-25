@@ -1,24 +1,18 @@
-// services/IsNameBlocked.js
-// Returns AMF3 boolean: true (0x03) = name is on the blocklist, false (0x02) otherwise.
-// The client (ActorService.isNameBlocked) just reads the boolean result.
-//
-// Drop a `bad_words` table in Supabase any time you want; if it doesn't exist
-// the service returns false (no false positives).
+// services/IsActorNameUsed.js
+// Returns AMF3 boolean: true (0x03) = name taken, false (0x02) = available.
+// Fix notes:
+//   - The previous version grabbed the FIRST printable string > 2 chars in the
+//     packet, which sometimes matched packet headers, not the username.
+//   - Now uses a real AMF0/AMF3 string-finder and picks the LAST string in the
+//     args body (the username is always the last argument the client sends).
 const db = require('../db.js');
-
-// Words/substrings that are blocked anywhere in the username. Lowercase.
-const HARD_BLOCK = [
-    'admin', 'moderator', 'mspstaff', 'msp_staff', 'staff', 'support',
-    'fuck', 'shit', 'bitch', 'cunt', 'pussy', 'dick', 'cock', 'asshole',
-    'nigger', 'nigga', 'faggot', 'retard', 'rape',
-];
 
 function parseStrings(body) {
     const strings = [];
     let i = 0;
     while (i < body.length - 2) {
         const marker = body[i];
-        if (marker === 0x06) {
+        if (marker === 0x06) {                       // AMF3 string
             const lenByte = body[i + 1];
             if (lenByte & 0x80) {
                 let uVal = 0, j = i + 1, shifts = 0;
@@ -42,7 +36,7 @@ function parseStrings(body) {
                     i += 2 + strLen; continue;
                 }
             }
-        } else if (marker === 0x02) {
+        } else if (marker === 0x02) {                // AMF0 string
             if (i + 2 < body.length) {
                 const strLen = body.readUInt16BE(i + 1);
                 if (strLen > 0 && strLen < 512 && i + 3 + strLen <= body.length) {
@@ -60,38 +54,21 @@ function parseStrings(body) {
 module.exports = {
     execute: async function (req) {
         const strings = parseStrings(req.body);
+        // The client sends only one user-controlled string (the name); pick the
+        // last one in case the dispatcher leaves headers/method names in front.
         const name = (strings[strings.length - 1] || '').trim();
-        console.log(`      => [IsNameBlocked] name=\"${name}\"`);
+        console.log(`      => [IsActorNameUsed] strings=${JSON.stringify(strings)} name=\"${name}\"`);
 
-        if (!name) return { __rawAMF3__: Buffer.from([0x02]) }; // not blocked
+        if (!name) return { __rawAMF3__: Buffer.from([0x02]) }; // false
 
-        const lower = name.toLowerCase();
-
-        // Built-in list
-        for (const w of HARD_BLOCK) {
-            if (lower.includes(w)) {
-                console.log(`      => [IsNameBlocked] HIT (builtin): \"${w}\"`);
-                return { __rawAMF3__: Buffer.from([0x03]) };
-            }
+        let isTaken = false;
+        try {
+            isTaken = await db.actorNameExists(name);
+        } catch (e) {
+            console.error('      => [IsActorNameUsed] DB error:', e.message);
         }
 
-        // Optional Supabase `bad_words` table — schema: id, word TEXT
-        if (typeof db.getBadWords === 'function') {
-            try {
-                const words = await db.getBadWords();
-                for (const w of (words || [])) {
-                    const ww = String(w.word || w).toLowerCase();
-                    if (ww && lower.includes(ww)) {
-                        console.log(`      => [IsNameBlocked] HIT (db): \"${ww}\"`);
-                        return { __rawAMF3__: Buffer.from([0x03]) };
-                    }
-                }
-            } catch (e) {
-                // Table may not exist — that's fine.
-            }
-        }
-
-        console.log(`      => [IsNameBlocked] OK: \"${name}\"`);
-        return { __rawAMF3__: Buffer.from([0x02]) };
+        console.log(`      => [IsActorNameUsed] \"${name}\" taken=${isTaken}`);
+        return { __rawAMF3__: Buffer.from([isTaken ? 0x03 : 0x02]) };
     }
 };

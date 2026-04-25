@@ -26,13 +26,13 @@ app.use((req, res, next) => {
 // 1. Cross-Domain Policy
 app.get('/crossdomain.xml', (req, res) => {
     res.type('text/xml');
-    res.send(`<?xml version="1.0"?><cross-domain-policy><allow-access-from domain="*" to-ports="*" /></cross-domain-policy>`);
+    res.send(`<?xml version=\"1.0\"?><cross-domain-policy><allow-access-from domain=\"*\" to-ports=\"*\" /></cross-domain-policy>`);
 });
 
 // ─── AMF0 PACKET PARSER ───────────────────────────────────────────────────────
 // Reads the raw AMF0 remoting envelope and extracts:
-//   • responseId  – e.g. "/1", "/2"  (used to build the reply target URI)
-//   • methodName  – e.g. "UserService.GetAppSettings"
+//   • responseId  – e.g. \"/1\", \"/2\"  (used to build the reply target URI)
+//   • methodName  – e.g. \"UserService.GetAppSettings\"
 //
 // AMF0 Remoting envelope layout:
 //   [0-1]  version   (0x00 0x00)
@@ -79,7 +79,7 @@ function parseAMF0Envelope(buf) {
 
 // ─── AMF PACKET BUILDER ───────────────────────────────────────────────────────
 function buildAMFPacket(responseId, amf3Data) {
-    // Target URI: e.g. "/1/onResult"
+    // Target URI: e.g. \"/1/onResult\"
     const targetUri = responseId + '/onResult';
     const responseNull = 'null';
 
@@ -100,42 +100,36 @@ function buildAMFPacket(responseId, amf3Data) {
     const lBuf = Buffer.alloc(4);
     lBuf.writeUInt32BE(amf3Data.length + 1, 0); // +1 for the 0x11 AMF3 marker
 
-    // 0x11 = AMF0 "switch to AMF3" marker
+    // 0x11 = AMF0 \"switch to AMF3\" marker
     const markerBuf = Buffer.from([0x11]);
 
     return Buffer.concat([header, tBuf, rBuf, lBuf, markerBuf, amf3Data]);
 }
 
+// AMF3 null body — used as the universal default reply for un-implemented
+// services so the AS3 client doesn't choke trying to parse an empty 200.
+const AMF3_NULL = Buffer.from([0x01]);
+
 // ─── GATEWAY ROUTE ────────────────────────────────────────────────────────────
-app.post('/Gateway.aspx', express.raw({ type: '*/*' }), (req, res) => {
+app.post('/Gateway.aspx', express.raw({ type: '*/*' }), async (req, res) => {
     const method = req.query.method;
     if (!method) return res.status(200).send();
 
     // --- Parse the AMF0 envelope to get the correct responseId ---
     let responseId = '/1'; // safe fallback
-    let parsedMethodName = method;
 
     const parsed = parseAMF0Envelope(req.body);
     if (parsed) {
-        // responseUri from Flash is the sequence number like "/1", "/2", etc.
         if (parsed.responseUri && /^\/\d+$/.test(parsed.responseUri.trim())) {
             responseId = parsed.responseUri.trim();
         } else if (parsed.responseUri && parsed.responseUri.trim()) {
-            // Some MSP versions put the full sequence in the responseUri field
-            // Extract the leading /N if present
             const m = parsed.responseUri.match(/(\/\d+)/);
             if (m) responseId = m[1];
         }
     } else {
-        // Fallback: scan raw bytes for the sequence number
-        // We look for the RESPONSE URI field, which comes AFTER the long target method string.
-        // Strategy: find the last occurrence of /N pattern in the first 500 bytes that is
-        // preceded by a 2-byte length field matching its own length — that's the responseUri.
         const headerString = req.body.subarray(0, 500).toString('latin1');
-        // Match isolated /digits — avoid matching /digits inside longer paths
         const matches = [...headerString.matchAll(/(?<![a-zA-Z0-9._])(\/[0-9]+)(?![a-zA-Z0-9._/])/g)];
         if (matches.length > 0) {
-            // The responseId is typically the LAST such match before the body data
             responseId = matches[matches.length - 1][1];
         }
     }
@@ -143,7 +137,14 @@ app.post('/Gateway.aspx', express.raw({ type: '*/*' }), (req, res) => {
     const scriptName = method.split('.').pop();
     const scriptPath = path.join(__dirname, 'services', `${scriptName}.js`);
 
-    console.log(`   -> [AMF Request] method="${method}" | script="${scriptName}" | responseId="${responseId}"`);
+    console.log(`   -> [AMF Request] method=\"${method}\" | script=\"${scriptName}\" | responseId=\"${responseId}\"`);
+
+    // Helper: build the final AMF wire packet from raw AMF3 bytes and send.
+    const sendAMF = (amf3Data) => {
+        const finalPacket = buildAMFPacket(responseId, amf3Data);
+        res.setHeader('Content-Type', 'application/x-amf');
+        res.status(200).send(finalPacket);
+    };
 
     if (fs.existsSync(scriptPath)) {
         try {
@@ -151,7 +152,7 @@ app.post('/Gateway.aspx', express.raw({ type: '*/*' }), (req, res) => {
             delete require.cache[require.resolve(scriptPath)];
 
             const handler = require(scriptPath);
-            const responseData = handler.execute(req);
+            const responseData = await Promise.resolve(handler.execute(req));
 
             // Allow scripts to return { __rawAMF3__: Buffer } to bypass libamf entirely
             let amf3Data;
@@ -165,17 +166,18 @@ app.post('/Gateway.aspx', express.raw({ type: '*/*' }), (req, res) => {
             }
             console.log(`   -> [AMF Response] AMF3 bytes (first 40):`, amf3Data.subarray(0, 40).toString('hex'));
 
-            const finalPacket = buildAMFPacket(responseId, amf3Data);
-
-            res.setHeader('Content-Type', 'application/x-amf');
-            res.status(200).send(finalPacket);
+            sendAMF(amf3Data);
         } catch (error) {
             console.error(`   -> [ERROR] Failed to run ${scriptName}.js:`, error);
-            res.status(500).send();
+            // Don't 500 — that aborts the whole AMF call queue on the client.
+            // Reply with AMF3 null so the client moves on.
+            sendAMF(AMF3_NULL);
         }
     } else {
-        console.log(`   -> [MISSING SCRIPT]: Create services/${scriptName}.js`);
-        res.status(200).send();
+        // No handler yet → reply with AMF3 null so the client doesn't choke
+        // on an empty body. Drop a TODO line for the dev.
+        console.log(`   -> [MISSING SCRIPT]: Create services/${scriptName}.js — replying AMF3 null`);
+        sendAMF(AMF3_NULL);
     }
 });
 
@@ -183,7 +185,7 @@ app.post('/Gateway.aspx', express.raw({ type: '*/*' }), (req, res) => {
 app.all(/^\/.*WebService\/User\/UserService\.asmx/i, (req, res) => {
     console.log(`   -> [SOAP SERVICE]: UserService`);
     res.type('text/xml');
-    res.send(`<?xml version="1.0" encoding="utf-8"?><wsdl:definitions xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/" targetNamespace="http://tempuri.org/"><wsdl:portType name="UserServiceSoap" /></wsdl:definitions>`);
+    res.send(`<?xml version=\"1.0\" encoding=\"utf-8\"?><wsdl:definitions xmlns:wsdl=\"http://schemas.xmlsoap.org/wsdl/\" targetNamespace=\"http://tempuri.org/\"><wsdl:portType name=\"UserServiceSoap\" /></wsdl:definitions>`);
 });
 
 // ─── CATCH-ALL ────────────────────────────────────────────────────────────────

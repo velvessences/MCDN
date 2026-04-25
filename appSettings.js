@@ -1,7 +1,7 @@
 // appSettings.js
-// Key names must EXACTLY match the AS3 AppSettings constants (case-sensitive!)
+console.log('✅ [appSettings] LOADED v2 (with Mangrove keys)'); 
+
 module.exports = {
-    // From AppSettings.as constant values:
     "ServerType":                           "unrestricted",
     "ShowCEOPLogo":                         "true",
     "ShowSIDLogo":                          "true",
@@ -22,10 +22,8 @@ module.exports = {
     "BlobServiceHostName":                  "localhost",
     "ChristmasStartDate":                   "12-01",
     "FMSAppName":                           "MSPWeb",
-
-    // Exact keys from AS3 constants:
     "DeviceFingerprintCollectionEnabled":   "false",
-    "specialinputtextchars":               "",
+    "specialinputtextchars":                "",
     "ModerationCheckUpdateTimerSeconds":    "60",
     "HelpCenterLink":                       "http://localhost:1600",
     "SafetyHelplineLink":                   "http://localhost:1600",
@@ -43,8 +41,7 @@ module.exports = {
     "AllowedNonFriendCommunication":        "true",
     "XmppUseLocalhost":                     "true",
     "XmppServerUrl":                        "localhost",
-    "giftcertificateenabled":              "true",
-    "MangroveAnalyticsFeatureUsageMinTime": "60",
+    "giftcertificateenabled":               "true",
     "LogMissingAssets":                     "true",
     "MySchoolFirstNameEnabled":             "false",
     "showoffercountdown":                   "false",
@@ -55,4 +52,27 @@ module.exports = {
     "enableClientExceptionLogging":         "false",
     "appsettingsversion":                   "1",
     "UserBehaviourFilterSymbol":            "",
+
+    // ⭐ THESE 6 KEYS ARE THE FIX FOR THE LOGIN CRASH ⭐
+    "MangroveAnalyticsSwitch":              "false",
+    "MangroveAnalyticsCollectorURL":        "http://localhost:1600/",
+    "MangroveAnalyticsBufferSize":          "5",
+    "MangroveAnalyticsDisabledEvents":      "",
+    "MangroveAnalyticsDisableBase64":       "false",
+    "MangroveAnalyticsFeatureUsageMinTime": "60",
+
+    "ShopEnabled":                          "true",
+    "MovieEnabled":                         "true",
+    "ChatEnabled":                          "true",
+    "ArtBookEnabled":                       "true",
+    "CompetitionEnabled":                   "true",
+    "AutogiftEnabled":                      "true",
+    "GuestBookEnabled":                     "true",
+    "MinUsernameLength":                    "3",
+    "MaxUsernameLength":                    "40",
+    "FamePointsPerLevel":                   "100",
+    "MaxLevel":                             "101",
+    "HighScoreListSize":                    "20",
+    "NewsFeedEnabled":                      "true",
+    "RoomEnabled":                          "true",
 };
