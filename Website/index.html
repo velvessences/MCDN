@@ -1,74 +1,55 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MCDN</title>
-<link rel="stylesheet" href="style.css">
-
-<style>
-/* Removes scrollbars and makes the background black */
-body {
-    margin: 0;
-    overflow: hidden;
-    background-color: #000000;
-}
-
-/* Floats your topbar over the game so it doesn't push the layout down */
-#topbar {
-    position: absolute;
-    top: 10px;
-    left: 20px;
-    color: white;
-    z-index: 10;
-}
-</style>
-
-<script>
-window.RufflePlayer = window.RufflePlayer || {};
-window.RufflePlayer.config = {
-    autoplay: "on",
-    unmuteOverlay: "visible",
-    letterbox: "on" /* This is the native Ruffle way to keep aspect ratio safe */
-};
-</script>
-<script src="https://unpkg.com/@ruffle-rs/ruffle"></script>
+  <title>MovieStarPlanet</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #000;
+      overflow: hidden;
+      height: 100%;
+      font-family: sans-serif;
+    }
+    #start {
+      width: 100vw;
+      height: 100vh;
+      background: #ff00aa;
+      color: white;
+      border: none;
+      font-size: 48px;
+      cursor: pointer;
+    }
+    #start:hover {
+      background: #ff33bb;
+    }
+    #flash-container {
+      width: 100vw;
+      height: 100vh;
+    }
+    embed {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+  </style>
 </head>
-
 <body>
-
-<div id="topbar">
-    <h1>MCDN</h1>
-</div>
-
-<div id="game"></div>
-
-<script>
-// 1. Automatically load the game when the page is ready
-window.addEventListener("DOMContentLoaded", () => {
-    const ruffle = window.RufflePlayer.newest();
-    const player = ruffle.createPlayer();
-
-    const container = document.getElementById("game");
-    container.innerHTML = "";
-    container.appendChild(player);
-
-    // 2. Tell the player to fill the browser window
-    player.style.width = "100vw";
-    player.style.height = "100vh";
-    player.style.display = "block";
-
-    // 3. YOUR exact original load settings, completely untouched
-    player.load({
-        url: "https://raw.githubusercontent.com/velvessences/MCDN/main/Main_23_04.swf",
-        allowScriptAccess: true,
-        backgroundColor: "#000000",
-        forceNetwork: true,
-        quality: "low",
-        scale: "showAll"
+  <button id="start">Click to start MovieStarPlanet</button>
+  <div id="flash-container"></div>
+  <script>
+    document.getElementById("start").addEventListener("click", function () {
+      document.getElementById("start").style.display = "none";
+      document.getElementById("flash-container").innerHTML =
+        '<embed src="https://raw.githubusercontent.com/velvessences/MCDN/main/Main_23_04.swf" ' +
+          'type="application/x-shockwave-flash" ' +
+          'width="1024" height="768" ' +
+          'allowscriptaccess="always" ' +
+          'allownetworking="all" ' +
+          'allowfullscreen="true" ' +
+          'wmode="direct" ' +
+          'quality="high">';
     });
-});
-</script>
-
+  </script>
 </body>
 </html>

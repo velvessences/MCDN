@@ -1,196 +1,213 @@
 // services/LoadDataForRegisterNewUser.js
-const libamf = require('libamf'); // Must match the server.js library
-// 1. Strongly Typed Classes
-// Adding _explicitType is a bulletproof fallback to force the AMF library to map it to AS3
-class RegisterNewUserData { constructor() { this._explicitType = "com.moviestarplanet.moviestar.valueObjects.RegisterNewUserData"; } }
-class Eye { constructor() { this._explicitType = "com.moviestarplanet.moviestar.valueObjects.Eye"; } }
-class EyeShadow { constructor() { this._explicitType = "com.moviestarplanet.moviestar.valueObjects.EyeShadow"; } }
-class Nose { constructor() { this._explicitType = "com.moviestarplanet.moviestar.valueObjects.Nose"; } }
-class Mouth { constructor() { this._explicitType = "com.moviestarplanet.moviestar.valueObjects.Mouth"; } }
-class Cloth { constructor() { this._explicitType = "com.moviestarplanet.moviestar.valueObjects.Cloth"; } }
+//
+// All classes use getters/setters — libamf can't populate them.
+// We bypass libamf entirely and write pure AMF3 bytes manually,
+// using the correct class aliases so Ruffle instantiates real AS3 objects.
 
-// 2. Bind the Javascript classes to the ActionScript classes so Flash accepts them
-if (libamf.registerClassAlias) {
-    libamf.registerClassAlias("com.moviestarplanet.moviestar.valueObjects.RegisterNewUserData", RegisterNewUserData);
-    libamf.registerClassAlias("com.moviestarplanet.moviestar.valueObjects.Eye", Eye);
-    libamf.registerClassAlias("com.moviestarplanet.moviestar.valueObjects.EyeShadow", EyeShadow);
-    libamf.registerClassAlias("com.moviestarplanet.moviestar.valueObjects.Nose", Nose);
-    libamf.registerClassAlias("com.moviestarplanet.moviestar.valueObjects.Mouth", Mouth);
-    libamf.registerClassAlias("com.moviestarplanet.moviestar.valueObjects.Cloth", Cloth);
+const appSettings = require("../appSettings.js");
+
+// ── Pure AMF3 encoder ─────────────────────────────────────────────────────────
+
+function encodeU29(n) {
+    if (n < 0x80)     return Buffer.from([n]);
+    if (n < 0x4000)   return Buffer.from([((n >> 7) & 0x7f) | 0x80, n & 0x7f]);
+    if (n < 0x200000) return Buffer.from([((n >> 14) & 0x7f) | 0x80, ((n >> 7) & 0x7f) | 0x80, n & 0x7f]);
+    return Buffer.from([((n >> 22) & 0x7f) | 0x80, ((n >> 15) & 0x7f) | 0x80, ((n >> 8) & 0x7f) | 0x80, n & 0xff]);
 }
 
-// Helper Functions
-function makeEye(id, swfSubfolder, skinId) {
-    const o = new Eye();
-    Object.assign(o, {
-        EyeId:         id,
-        Name:          swfSubfolder,
-        SWF:           swfSubfolder,       
-        SWFLocation:   swfSubfolder,
-        DragonBone:    true,
-        SkinId:        skinId,
-        RegNewUser:    skinId,
-        type:          "eyes",
-        DefaultColors: "0",
-        sortorder:     id,
-        hidden:        false,
-    });
-    return o;
+function rawStr(str) {
+    // Raw AMF3 string (no 0x06 marker) — used for trait keys and class names
+    const b = Buffer.from(str, 'utf8');
+    return Buffer.concat([encodeU29((b.length << 1) | 1), b]);
 }
 
-function makeEyeShadow(id, swfSubfolder, skinId) {
-    const o = new EyeShadow();
-    Object.assign(o, {
-        EyeShadowId:   id,
-        Name:          swfSubfolder,
-        SWF:           swfSubfolder,       
-        SWFLocation:   swfSubfolder,
-        DragonBone:    true,
-        SkinId:        skinId,
-        RegNewUser:    skinId,
-        type:          "eyeShadow",
-        DefaultColors: "0",
-        sortorder:     id,
-        hidden:        false,
-    });
-    return o;
+function amf3Null()    { return Buffer.from([0x01]); }
+function amf3True()    { return Buffer.from([0x03]); }
+function amf3False()   { return Buffer.from([0x02]); }
+
+function amf3Int(n) {
+    // AMF3 integer: marker 0x04 + U29
+    return Buffer.concat([Buffer.from([0x04]), encodeU29(n & 0x1FFFFFFF)]);
 }
 
-function makeNose(id, swfFilename, skinId) {
-    const o = new Nose();
-    Object.assign(o, {
-        NoseId:        id,
-        Name:          swfFilename,
-        SWF:           swfFilename,
-        SWFLocation:   `noses/${swfFilename}`,        
-        DragonBone:    false,
-        SkinId:        skinId,
-        RegNewUser:    skinId,
-        type:          "nose",
-        DefaultColors: "0",
-        sortorder:     id,
-        hidden:        false,
-    });
-    return o;
+function amf3String(str) {
+    if (str === null || str === undefined) return amf3Null();
+    const b = Buffer.from(str, 'utf8');
+    return Buffer.concat([Buffer.from([0x06]), encodeU29((b.length << 1) | 1), b]);
 }
 
-function makeMouth(id, swfFilename, skinId) {
-    const o = new Mouth();
-    Object.assign(o, {
-        MouthId:       id,
-        Name:          swfFilename,
-        SWF:           swfFilename,
-        SWFLocation:   `mouths/${swfFilename}`,        
-        DragonBone:    false,
-        SkinId:        skinId,
-        RegNewUser:    skinId,
-        type:          "mouth",
-        DefaultColors: "0",
-        sortorder:     id,
-        hidden:        false,
-    });
-    return o;
+function amf3Bool(v) { return v ? amf3True() : amf3False(); }
+
+// Sealed typed AMF3 object with a registered class alias
+// props: array of [name, valueBuffer] pairs IN ORDER
+function amf3TypedObject(alias, props) {
+    // traits: (propCount << 4) | 0x03 = sealed, not dynamic
+    const parts = [
+        Buffer.from([0x0A]),
+        encodeU29((props.length << 4) | 0x03),
+        rawStr(alias),
+    ];
+    for (const [k] of props) parts.push(rawStr(k));   // sealed prop names
+    for (const [, v] of props) parts.push(v);          // sealed prop values
+    return Buffer.concat(parts);
 }
 
-function makeCloth(id, subdir, filename, categoryId, skinId) {
-    const clothPath = `${subdir}/${filename}`;
-    const o = new Cloth();
-    Object.assign(o, {
-        ClothesId:          id,
-        Name:               filename,
-        path:               clothPath,     
-        SWF:                clothPath,
-        ClothesCategoryId:  categoryId,
-        SkinId:             skinId,
-        RegNewUser:         skinId,
-        ColorScheme:        "0",
-        hidden:             false,
-    });
-    return o;
+function amf3Array(items) {
+    // Dense AMF3 array
+    const parts = [Buffer.from([0x09]), encodeU29((items.length << 1) | 1), Buffer.from([0x01])];
+    for (const item of items) parts.push(item);
+    return Buffer.concat(parts);
 }
+
+// ── Value object builders ─────────────────────────────────────────────────────
+
+// FacePart base fields (public vars — safe to send as sealed props)
+function facePartProps(o) {
+    return [
+        ['SWF',           amf3String(o.SWF)],
+        ['Name',          amf3String(o.Name)],
+        ['DragonBone',    amf3Bool(o.DragonBone)],
+        ['SkinId',        amf3Int(o.SkinId)],
+        ['RegNewUser',    amf3Int(o.RegNewUser)],
+        ['DefaultColors', amf3String(o.DefaultColors || '0')],
+        ['sortorder',     amf3Int(o.sortorder || 0)],
+        ['hidden',        amf3Bool(o.hidden || false)],
+        ['Price',         amf3Int(0)],
+        ['Vip',           amf3Int(0)],
+        ['Discount',      amf3Int(0)],
+        ['isNew',         amf3Int(0)],
+        ['DiamondsPrice', amf3Int(0)],
+    ];
+}
+
+function encodeEye(o) {
+    return amf3TypedObject(
+        'MovieStarPlanet.Model.Actor.ValueObjects.Eye',
+        [['EyeId', amf3Int(o.EyeId)], ...facePartProps(o)]
+    );
+}
+
+function encodeEyeShadow(o) {
+    return amf3TypedObject(
+        'MovieStarPlanet.Model.Actor.ValueObjects.EyeShadow',
+        [['EyeShadowId', amf3Int(o.EyeShadowId)], ...facePartProps(o)]
+    );
+}
+
+function encodeNose(o) {
+    return amf3TypedObject(
+        'MovieStarPlanet.Model.Actor.ValueObjects.Nose',
+        [['NoseId', amf3Int(o.NoseId)], ...facePartProps(o)]
+    );
+}
+
+function encodeMouth(o) {
+    return amf3TypedObject(
+        'MovieStarPlanet.Model.Actor.ValueObjects.Mouth',
+        [['MouthId', amf3Int(o.MouthId)], ...facePartProps(o)]
+    );
+}
+
+function encodeCloth(o) {
+    // Cloth uses getters/setters — send all settable fields
+    return amf3TypedObject(
+        'MovieStarPlanet.Model.Actor.ValueObjects.UiActorClothes',
+        [
+            ['ClothesId',         amf3Int(o.ClothesId)],
+            ['Name',              amf3String(o.Name)],
+            ['SWF',               amf3String(o.SWF)],
+            ['ClothesCategoryId', amf3Int(o.ClothesCategoryId)],
+            ['SkinId',            amf3Int(o.SkinId)],
+            ['RegNewUser',        amf3Int(o.RegNewUser)],
+            ['ColorScheme',       amf3String(o.ColorScheme || '0')],
+            ['Price',             amf3Int(0)],
+            ['Vip',               amf3Int(0)],
+            ['ShopId',            amf3Int(0)],
+            ['Discount',          amf3Int(0)],
+            ['DiamondsPrice',     amf3Int(0)],
+            ['sortorder',         amf3Int(o.sortorder || 0)],
+            ['isNew',             amf3Int(0)],
+        ]
+    );
+}
+
+function encodeRegisterNewUserData(d) {
+    return amf3TypedObject(
+        'RegisterNewUserData',
+        [
+            ['eyes',       amf3Array(d.eyes.map(encodeEye))],
+            ['eyeShadows', amf3Array(d.eyeShadows.map(encodeEyeShadow))],
+            ['noses',      amf3Array(d.noses.map(encodeNose))],
+            ['mouths',     amf3Array(d.mouths.map(encodeMouth))],
+            ['clothes',    amf3Array(d.clothes.map(encodeCloth))],
+        ]
+    );
+}
+
+// ── Data ──────────────────────────────────────────────────────────────────────
 
 module.exports = {
     execute: function(req) {
-        console.log("      => [LoadDataForRegisterNewUser] Building character creator data...");
+        console.log("      => [LoadDataForRegisterNewUser] Building character creator data (manual AMF3)...");
 
-        const responseData = new RegisterNewUserData();
+        const data = {
+            eyes: [
+                { EyeId:1,  SWF:'eyes_girlnextdoor_2013',  Name:'eyes_girlnextdoor_2013',  DragonBone:true, SkinId:1, RegNewUser:1 },
+                { EyeId:2,  SWF:'eyes_prettyperfect_2013',  Name:'eyes_prettyperfect_2013',  DragonBone:true, SkinId:1, RegNewUser:1 },
+                { EyeId:3,  SWF:'eyes_glittergalore_2013',  Name:'eyes_glittergalore_2013',  DragonBone:true, SkinId:1, RegNewUser:1 },
+                { EyeId:4,  SWF:'eyes_cateyes_2013',        Name:'eyes_cateyes_2013',        DragonBone:true, SkinId:1, RegNewUser:1 },
+                { EyeId:5,  SWF:'eyes_partyperfect_2013',   Name:'eyes_partyperfect_2013',   DragonBone:true, SkinId:1, RegNewUser:1 },
+                { EyeId:11, SWF:'eyes_boynextdoor_2013',    Name:'eyes_boynextdoor_2013',    DragonBone:true, SkinId:2, RegNewUser:2 },
+                { EyeId:12, SWF:'eyes_theman_2013',         Name:'eyes_theman_2013',         DragonBone:true, SkinId:2, RegNewUser:2 },
+                { EyeId:13, SWF:'eyes_themanblue_2013',     Name:'eyes_themanblue_2013',     DragonBone:true, SkinId:2, RegNewUser:2 },
+                { EyeId:14, SWF:'eyes_honesthero_2013',     Name:'eyes_honesthero_2013',     DragonBone:true, SkinId:2, RegNewUser:2 },
+                { EyeId:15, SWF:'eyes_shadysunday_2013',    Name:'eyes_shadysunday_2013',    DragonBone:true, SkinId:2, RegNewUser:2 },
+            ],
+            eyeShadows: [
+                { EyeShadowId:1,  SWF:'eyeshadow_sweetstuff_2013',   Name:'eyeshadow_sweetstuff_2013',   DragonBone:true, SkinId:1, RegNewUser:1 },
+                { EyeShadowId:2,  SWF:'eyeshadow_femalestar_2013',   Name:'eyeshadow_femalestar_2013',   DragonBone:true, SkinId:1, RegNewUser:1 },
+                { EyeShadowId:3,  SWF:'eyeshadow_partyperfect_2013', Name:'eyeshadow_partyperfect_2013', DragonBone:true, SkinId:1, RegNewUser:1 },
+                { EyeShadowId:4,  SWF:'eyeshadow_cateyes_2013',      Name:'eyeshadow_cateyes_2013',      DragonBone:true, SkinId:1, RegNewUser:1 },
+                { EyeShadowId:11, SWF:'eyeshadow_party_2013',        Name:'eyeshadow_party_2013',        DragonBone:true, SkinId:2, RegNewUser:2 },
+                { EyeShadowId:12, SWF:'eyeshadow_bling_2013',        Name:'eyeshadow_bling_2013',        DragonBone:true, SkinId:2, RegNewUser:2 },
+            ],
+            noses: [
+                { NoseId:1,  SWF:'nose_8_freckles.swf', Name:'nose_8_freckles.swf', DragonBone:false, SkinId:1, RegNewUser:1 },
+                { NoseId:11, SWF:'nose_3.swf',           Name:'nose_3.swf',           DragonBone:false, SkinId:2, RegNewUser:2 },
+            ],
+            mouths: [
+                { MouthId:1,  SWF:'eternallove_2011_femalelips_nd.swf', Name:'eternallove_2011_femalelips_nd.swf', DragonBone:false, SkinId:1, RegNewUser:1 },
+                { MouthId:2,  SWF:'female_mouth_3.swf',                 Name:'female_mouth_3.swf',                 DragonBone:false, SkinId:1, RegNewUser:1 },
+                { MouthId:11, SWF:'male_mouth_2.swf',                   Name:'male_mouth_2.swf',                   DragonBone:false, SkinId:2, RegNewUser:2 },
+            ],
+            clothes: [
+                { ClothesId:101, SWF:'hair/miami_2011_female_hair_3.swf',             Name:'miami_2011_female_hair_3.swf',             ClothesCategoryId:1, SkinId:1, RegNewUser:1 },
+                { ClothesId:102, SWF:'hair/HouseParty_2011_female_hair_1_nd.swf',     Name:'HouseParty_2011_female_hair_1_nd.swf',     ClothesCategoryId:1, SkinId:1, RegNewUser:1 },
+                { ClothesId:103, SWF:'hair/valentines_2011_female_hair_2.swf',        Name:'valentines_2011_female_hair_2.swf',        ClothesCategoryId:1, SkinId:1, RegNewUser:1 },
+                { ClothesId:111, SWF:'hair/Hair_clovn_Taunus.swf',                   Name:'Hair_clovn_Taunus.swf',                   ClothesCategoryId:1, SkinId:2, RegNewUser:2 },
+                { ClothesId:112, SWF:'hair/emo_2011_male_hair_3.swf',                Name:'emo_2011_male_hair_3.swf',                ClothesCategoryId:1, SkinId:2, RegNewUser:2 },
+                { ClothesId:113, SWF:'hair/2009_hair_boys_Honey_5.swf',              Name:'2009_hair_boys_Honey_5.swf',              ClothesCategoryId:1, SkinId:2, RegNewUser:2 },
+                { ClothesId:201, SWF:'arabianProm_2015_diamond_dg.swf',         Name:'arabianProm_2015_diamond_dg.swf',         ClothesCategoryId:2, SkinId:1, RegNewUser:1 },
+                { ClothesId:202, SWF:'Aloha_2014_PineappleTee_FJ.swf',         Name:'Aloha_2014_PineappleTee_FJ.swf',         ClothesCategoryId:2, SkinId:1, RegNewUser:1 },
+                { ClothesId:203, SWF:'amusementpark_2011_female_top_7.swf',     Name:'amusementpark_2011_female_top_7.swf',     ClothesCategoryId:2, SkinId:1, RegNewUser:1 },
+                { ClothesId:211, SWF:'rockstarchristmas_2011_female_tops_1.swf',Name:'rockstarchristmas_2011_female_tops_1.swf',ClothesCategoryId:2, SkinId:2, RegNewUser:2 },
+                { ClothesId:301, SWF:'Mexico_2012_FemaleMariachiShorts_ms.swf', Name:'Mexico_2012_FemaleMariachiShorts_ms.swf', ClothesCategoryId:3, SkinId:1, RegNewUser:1 },
+                { ClothesId:302, SWF:'grinch_2011_female_bottoms_4.swf',     Name:'grinch_2011_female_bottoms_4.swf',     ClothesCategoryId:3, SkinId:1, RegNewUser:1 },
+                { ClothesId:303, SWF:'june_female_bottoms_3.swf',            Name:'june_female_bottoms_3.swf',            ClothesCategoryId:3, SkinId:1, RegNewUser:1 },
+                { ClothesId:311, SWF:'Christmas_2011_male_bottoms_nd_1.swf', Name:'Christmas_2011_male_bottoms_nd_1.swf', ClothesCategoryId:3, SkinId:2, RegNewUser:2 },
+                { ClothesId:312, SWF:'elvistrousers.swf',                   Name:'elvistrousers.swf',                   ClothesCategoryId:3, SkinId:2, RegNewUser:2 },
+                { ClothesId:313, SWF:'Honey_bottoms_10_boys.swf',           Name:'Honey_bottoms_10_boys.swf',           ClothesCategoryId:3, SkinId:2, RegNewUser:2 },
+                { ClothesId:501, SWF:'footwear/may_shoes_female_1.swf',             Name:'may_shoes_female_1.swf',             ClothesCategoryId:5, SkinId:1, RegNewUser:1 },
+                { ClothesId:511, SWF:'footwear/may_shoes_female_1.swf',             Name:'may_shoes_female_1.swf',             ClothesCategoryId:5, SkinId:2, RegNewUser:2 },
+                { ClothesId:601, SWF:'accessories/Christmas_2014_hairPin_dg.swf',   Name:'Christmas_2014_hairPin_dg.swf',   ClothesCategoryId:6, SkinId:1, RegNewUser:1 },
+                { ClothesId:602, SWF:'accessories/easter_2012_ChickCap_nd.swf',     Name:'easter_2012_ChickCap_nd.swf',     ClothesCategoryId:6, SkinId:1, RegNewUser:1 },
+                { ClothesId:611, SWF:'accessories/December_hat_6.swf',              Name:'December_hat_6.swf',              ClothesCategoryId:6, SkinId:2, RegNewUser:2 },
+                { ClothesId:612, SWF:'accessories/Kineserhat.swf',                  Name:'Kineserhat.swf',                  ClothesCategoryId:6, SkinId:2, RegNewUser:2 },
+            ],
+        };
 
-        responseData.eyes = [
-            // female
-            makeEye(1,  "eyes_girlnextdoor_2013",  1),
-            makeEye(2,  "eyes_prettyperfect_2013",  1),
-            makeEye(3,  "eyes_glittergalore_2013",  1),
-            makeEye(4,  "eyes_cateyes_2013",        1),
-            makeEye(5,  "eyes_partyperfect_2013",   1),
-            // male
-            makeEye(11, "eyes_boynextdoor_2013",    2),
-            makeEye(12, "eyes_theman_2013",         2),
-            makeEye(13, "eyes_themanblue_2013",     2),
-            makeEye(14, "eyes_honesthero_2013",     2),
-            makeEye(15, "eyes_shadysunday_2013",    2),
-        ];
-
-        responseData.eyeShadows = [
-            // female
-            makeEyeShadow(1, "eyeshadow_sweetstuff_2013",   1),
-            makeEyeShadow(2, "eyeshadow_femalestar_2013",   1),
-            makeEyeShadow(3, "eyeshadow_partyperfect_2013", 1),
-            makeEyeShadow(4, "eyeshadow_cateyes_2013",      1),
-            // male
-            makeEyeShadow(11, "eyeshadow_party_2013",       2),
-            makeEyeShadow(12, "eyeshadow_bling_2013",       2),
-        ];
-
-        responseData.noses = [
-            makeNose(1,  "nose_8_freckles.swf", 1),
-            makeNose(11, "nose_3.swf",           2),
-        ];
-
-        responseData.mouths = [
-            makeMouth(1,  "eternallove_2011_femalelips_nd.swf", 1),
-            makeMouth(2,  "female_mouth_3.swf",                 1),
-            makeMouth(11, "male_mouth_2.swf",                   2),
-        ];
-
-        responseData.clothes = [
-            // HAIR — category 1 
-            makeCloth(101, "hair", "miami_2011_female_hair_3.swf",  1, 1),
-            makeCloth(102, "hair", "HouseParty_2011_female_hair_1_nd.swf", 1, 1),
-            makeCloth(103, "hair", "valentines_2011_female_hair_2.swf", 1, 1),
-            ///
-            makeCloth(111, "hair", "Hair_clovn_Taunus.swf",      1, 2),
-            makeCloth(112, "hair", "emo_2011_male_hair_3.swf",               1, 2),
-            makeCloth(113, "hair", "2009_hair_boys_Honey_5.swf",               1, 2),
-
-            // TOPS — category 2 
-            makeCloth(201, "tops", "arabianProm_2015_diamond_dg.swf",         2, 1),
-            makeCloth(202, "tops", "Aloha_2014_PineappleTee_FJ.swf",                         2, 1),
-            makeCloth(203, "tops", "amusementpark_2011_female_top_7.swf",                         2, 1),
-            ///
-            makeCloth(211, "tops", "rockstarchristmas_2011_female_tops_1.swf",    2, 2),
-
-            // BOTTOMS — category 3 
-            makeCloth(301, "bottoms", "Mexico_2012_FemaleMariachiShorts_ms.swf", 3, 1),
-            makeCloth(302, "bottoms", "grinch_2011_female_bottoms_4.swf",                      3, 1),
-            makeCloth(303, "bottoms", "june_female_bottoms_3.swf",                      3, 1),
-            ///
-            makeCloth(311, "bottoms", "Christmas_2011_male_bottoms_nd_1.swf",                        3, 2),
-            makeCloth(312, "bottoms", "elvistrousers.swf",                        3, 2),
-            makeCloth(313, "bottoms", "Honey_bottoms_10_boys.swf",                        3, 2),
-
-            // FOOTWEAR — category 5 
-            makeCloth(501, "footwear", "may_shoes_female_1.swf",  5, 1),
-            ///
-            makeCloth(511, "footwear", "may_shoes_female_1.swf",        5, 2),
-
-            // HEADWEAR — category 6 
-            makeCloth(601, "accessories", "Christmas_2014_hairPin_dg.swf",  6, 1),
-            makeCloth(602, "accessories", "easter_2012_ChickCap_nd.swf",  6, 1),
-            //
-            makeCloth(611, "accessories", "December_hat_6.swf",    6, 2),
-            makeCloth(612, "accessories", "Kineserhat.swf",    6, 2),
-        ];
-
-        return responseData;
+        const raw = encodeRegisterNewUserData(data);
+        console.log(`      => AMF3 bytes (first 20): ${raw.subarray(0,20).toString('hex')}`);
+        return { __rawAMF3__: raw };
     }
 };

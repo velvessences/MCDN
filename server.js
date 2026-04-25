@@ -133,7 +133,7 @@ app.post('/Gateway.aspx', express.raw({ type: '*/*' }), (req, res) => {
         // preceded by a 2-byte length field matching its own length — that's the responseUri.
         const headerString = req.body.subarray(0, 500).toString('latin1');
         // Match isolated /digits — avoid matching /digits inside longer paths
-        const matches = [...headerString.matchAll(/(?<![a-zA-Z0-9._])(\\/[0-9]+)(?![a-zA-Z0-9._/])/g)];
+        const matches = [...headerString.matchAll(/(?<![a-zA-Z0-9._])(\/[0-9]+)(?![a-zA-Z0-9._/])/g)];
         if (matches.length > 0) {
             // The responseId is typically the LAST such match before the body data
             responseId = matches[matches.length - 1][1];
@@ -153,12 +153,16 @@ app.post('/Gateway.aspx', express.raw({ type: '*/*' }), (req, res) => {
             const handler = require(scriptPath);
             const responseData = handler.execute(req);
 
-            console.log(`   -> [AMF Response] Serializing:`, JSON.stringify(responseData).substring(0, 200));
-
-            // Serialize to AMF3
-            const rawAmf3 = libamf.serialize(responseData, libamf.AMF3);
-            const amf3Data = Buffer.isBuffer(rawAmf3) ? rawAmf3 : Buffer.from(rawAmf3);
-
+            // Allow scripts to return { __rawAMF3__: Buffer } to bypass libamf entirely
+            let amf3Data;
+            if (responseData && Buffer.isBuffer(responseData.__rawAMF3__)) {
+                console.log(`   -> [AMF Response] Using raw AMF3 bytes from script`);
+                amf3Data = responseData.__rawAMF3__;
+            } else {
+                console.log(`   -> [AMF Response] Serializing:`, JSON.stringify(responseData).substring(0, 200));
+                const rawAmf3 = libamf.serialize(responseData, libamf.AMF3);
+                amf3Data = Buffer.isBuffer(rawAmf3) ? rawAmf3 : Buffer.from(rawAmf3);
+            }
             console.log(`   -> [AMF Response] AMF3 bytes (first 40):`, amf3Data.subarray(0, 40).toString('hex'));
 
             const finalPacket = buildAMFPacket(responseId, amf3Data);
