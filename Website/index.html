@@ -178,32 +178,52 @@
 <body>
 
   <div id="start-screen">
-    <div class="logo">MovieStar<br><span>Planet</span></div>
-    <div class="subtitle">2013 private archive</div>
-    <button id="start">▶ &nbsp; Enter</button>
+    <div class="logo">MovieStarPlanet<br><span>2013</span></div>
+    <div class="subtitle">Private server created by xavier</div>
+    <button id="start">▶ &nbsp; Enter the World</button>
   </div>
 
   <div id="flash-container"></div>
   <div id="error-msg"></div>
 
   <script>
-    // ── CONFIG ──────────────────────────────────────────────────────────────
-    // Base URL where your SWF + all assets live (must end with /)
-    // Put your CDN root here — NOT the raw GitHub URL directly,
-    // because GitHub raw sets Content-Type: text/plain which Flash rejects.
-    // Host on Cloudflare Pages, Netlify, or your own server instead.
-    var CDN_BASE = "https://raw.githubusercontent.com/velvessences/MCDN/main/CDN/";
+    // ══════════════════════════════════════════════════════════════════════════
+    // CONFIG — edit these two blocks only
+    // ══════════════════════════════════════════════════════════════════════════
 
-    // The main SWF filename (should be at CDN_BASE root)
+    // ── ASSETS (SWF files, graphics, styles) ─────────────────────────────────
+    // GitHub raw works for the MAIN swf embed but child SWFs need proper MIME types.
+    // Move to Cloudflare Pages / Netlify if child assets fail to load.
+    var CDN_BASE = "https://raw.githubusercontent.com/velvessences/MCDN/main/CDN/";
     var SWF_FILE = "https://raw.githubusercontent.com/velvessences/MCDN/main/Main_20130527_172419.swf";
 
+    // ── SERVER (your Railway backend) ─────────────────────────────────────────
+    var SERVER   = "https://mspserver-production.up.railway.app";
+
+    // ══════════════════════════════════════════════════════════════════════════
+
     // ── FLASH VARS ──────────────────────────────────────────────────────────
-    // CustomBasePath tells the game where to load all sub-SWF assets from.
-    // cdnBasePath / cdnLocalBasePath are extra overrides used by the CDN loader.
     var flashVars = [
-      "CustomBasePath="   + encodeURIComponent(CDN_BASE),
-      "cdnBasePath="      + encodeURIComponent(CDN_BASE),
-      "cdnLocalBasePath=" + encodeURIComponent(CDN_BASE),
+      // Asset paths
+      "CustomBasePath="        + encodeURIComponent(CDN_BASE),
+      "cdnBasePath="           + encodeURIComponent(CDN_BASE),
+      "cdnLocalBasePath="      + encodeURIComponent(CDN_BASE),
+
+      // Server endpoints — override every localhost:1600 URL the game knows about
+      "serverUrl="             + encodeURIComponent(SERVER + "/"),
+      "webServiceUrl="         + encodeURIComponent(SERVER + "/WebService/Service.asmx"),
+      "gatewayUrl="            + encodeURIComponent(SERVER + "/Gateway.aspx"),
+      "userServiceUrl="        + encodeURIComponent(SERVER + "/WebService/User/UserService.asmx"),
+      "profileServiceUrl="     + encodeURIComponent(SERVER + "/WebService/Profile/ProfileService.asmx"),
+      "activityServiceUrl="    + encodeURIComponent(SERVER + "/WebService/Activity/ActivityService.asmx"),
+      "scrapBlogServiceUrl="   + encodeURIComponent(SERVER + "/WebService/ScrapBlog/ScrapBlogService.asmx"),
+      "themeServiceUrl="       + encodeURIComponent(SERVER + "/WebService/ThemeManager/ThemeManagerService.asmx"),
+      "parentalConsentUrl="    + encodeURIComponent(SERVER + "/WebService/ParentalConsent/ParentalConsentWebService.asmx"),
+
+      // Tell the SWF it is running on a real website (not localhost),
+      // so it skips the "IsRunningLocally" dev-mode branch
+      "isDevSite=false",
+      "isAdminSite=false",
     ].join("&");
 
     // ── LAUNCH ──────────────────────────────────────────────────────────────
