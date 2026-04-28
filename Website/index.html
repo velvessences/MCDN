@@ -3,54 +3,242 @@
 <head>
   <title>MovieStarPlanet</title>
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Fredoka+One&display=swap');
+
     html, body {
       margin: 0;
       padding: 0;
-      background: #000;
+      background: #1a0033;
       overflow: hidden;
       height: 100%;
-      font-family: sans-serif;
     }
+
+    /* Animated star background */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(1px 1px at 10% 20%, #fff 0%, transparent 100%),
+        radial-gradient(1px 1px at 30% 60%, #ffaaee 0%, transparent 100%),
+        radial-gradient(1px 1px at 50% 10%, #fff 0%, transparent 100%),
+        radial-gradient(1px 1px at 70% 80%, #aaeeff 0%, transparent 100%),
+        radial-gradient(1px 1px at 90% 30%, #fff 0%, transparent 100%),
+        radial-gradient(1px 1px at 20% 90%, #ffddaa 0%, transparent 100%),
+        radial-gradient(1px 1px at 80% 50%, #fff 0%, transparent 100%),
+        radial-gradient(1px 1px at 45% 75%, #ffaacc 0%, transparent 100%),
+        radial-gradient(1px 1px at 65% 40%, #fff 0%, transparent 100%),
+        radial-gradient(1px 1px at 5%  55%, #ccaaff 0%, transparent 100%);
+      background-size: 400px 400px;
+      animation: twinkle 4s infinite alternate;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    @keyframes twinkle {
+      0%   { opacity: 0.4; }
+      100% { opacity: 1; }
+    }
+
+    #start-screen {
+      position: relative;
+      z-index: 1;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 32px;
+    }
+
+    .logo {
+      font-family: 'Fredoka One', cursive, sans-serif;
+      font-size: clamp(36px, 7vw, 80px);
+      color: #fff;
+      text-shadow:
+        0 0 20px #ff44cc,
+        0 0 60px #ff00aa,
+        0 4px 0 #aa0066;
+      letter-spacing: 2px;
+      animation: pulse-glow 2.5s ease-in-out infinite;
+      text-align: center;
+      line-height: 1.1;
+    }
+
+    .logo span {
+      color: #ffdd00;
+      text-shadow:
+        0 0 20px #ffaa00,
+        0 0 60px #ff6600,
+        0 4px 0 #aa4400;
+    }
+
+    @keyframes pulse-glow {
+      0%, 100% { filter: brightness(1); }
+      50%       { filter: brightness(1.25); }
+    }
+
+    .subtitle {
+      font-family: 'Fredoka One', cursive, sans-serif;
+      font-size: clamp(14px, 2vw, 20px);
+      color: #ffaaee;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      opacity: 0.8;
+    }
+
     #start {
-      width: 100vw;
-      height: 100vh;
-      background: #ff00aa;
-      color: white;
-      border: none;
-      font-size: 48px;
+      position: relative;
+      font-family: 'Fredoka One', cursive, sans-serif;
+      font-size: clamp(20px, 3vw, 32px);
+      padding: 18px 60px;
+      background: linear-gradient(135deg, #ff00aa, #cc00ff);
+      color: #fff;
+      border: 3px solid rgba(255,255,255,0.4);
+      border-radius: 60px;
       cursor: pointer;
+      letter-spacing: 1px;
+      box-shadow:
+        0 0 30px #ff00aa88,
+        0 0 60px #cc00ff44,
+        inset 0 1px 0 rgba(255,255,255,0.3);
+      transition: transform 0.15s, box-shadow 0.15s;
+      animation: bounce-in 0.6s cubic-bezier(.34,1.56,.64,1) both;
     }
+
+    @keyframes bounce-in {
+      from { transform: scale(0.5); opacity: 0; }
+      to   { transform: scale(1);   opacity: 1; }
+    }
+
     #start:hover {
-      background: #ff33bb;
+      transform: scale(1.07) translateY(-2px);
+      box-shadow:
+        0 0 50px #ff00aaaa,
+        0 0 100px #cc00ff66,
+        inset 0 1px 0 rgba(255,255,255,0.3);
     }
+
+    #start:active {
+      transform: scale(0.97);
+    }
+
+    /* sparkle dots around button */
+    #start::before, #start::after {
+      content: '★';
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 18px;
+      color: #ffdd00;
+      text-shadow: 0 0 10px #ffaa00;
+      animation: spin-star 3s linear infinite;
+    }
+    #start::before { left: 18px; animation-direction: normal; }
+    #start::after  { right: 18px; animation-direction: reverse; }
+
+    @keyframes spin-star {
+      0%   { transform: translateY(-50%) rotate(0deg)   scale(1);   }
+      50%  { transform: translateY(-50%) rotate(180deg) scale(1.4); }
+      100% { transform: translateY(-50%) rotate(360deg) scale(1);   }
+    }
+
     #flash-container {
+      display: none;
       width: 100vw;
       height: 100vh;
+      position: relative;
+      z-index: 1;
     }
-    embed {
+
+    embed, object {
       display: block;
       width: 100%;
       height: 100%;
     }
+
+    /* Error banner */
+    #error-msg {
+      display: none;
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: #cc0000dd;
+      color: #fff;
+      font-family: monospace;
+      font-size: 13px;
+      padding: 10px 16px;
+      z-index: 999;
+      backdrop-filter: blur(4px);
+    }
   </style>
 </head>
 <body>
-  <button id="start">Click to start MovieStarPlanet</button>
+
+  <div id="start-screen">
+    <div class="logo">MovieStar<br><span>Planet</span></div>
+    <div class="subtitle">2013 private archive</div>
+    <button id="start">▶ &nbsp; Enter</button>
+  </div>
+
   <div id="flash-container"></div>
+  <div id="error-msg"></div>
+
   <script>
+    // ── CONFIG ──────────────────────────────────────────────────────────────
+    // Base URL where your SWF + all assets live (must end with /)
+    // Put your CDN root here — NOT the raw GitHub URL directly,
+    // because GitHub raw sets Content-Type: text/plain which Flash rejects.
+    // Host on Cloudflare Pages, Netlify, or your own server instead.
+    var CDN_BASE = "https://raw.githubusercontent.com/velvessences/MCDN/main/CDN/";
+
+    // The main SWF filename (should be at CDN_BASE root)
+    var SWF_FILE = "https://raw.githubusercontent.com/velvessences/MCDN/main/Main_20130527_172419.swf";
+
+    // ── FLASH VARS ──────────────────────────────────────────────────────────
+    // CustomBasePath tells the game where to load all sub-SWF assets from.
+    // cdnBasePath / cdnLocalBasePath are extra overrides used by the CDN loader.
+    var flashVars = [
+      "CustomBasePath="   + encodeURIComponent(CDN_BASE),
+      "cdnBasePath="      + encodeURIComponent(CDN_BASE),
+      "cdnLocalBasePath=" + encodeURIComponent(CDN_BASE),
+    ].join("&");
+
+    // ── LAUNCH ──────────────────────────────────────────────────────────────
     document.getElementById("start").addEventListener("click", function () {
-      document.getElementById("start").style.display = "none";
-      document.getElementById("flash-container").innerHTML =
-       //  '<embed src="https://raw.githubusercontent.com/velvessences/MCDN/main/Main_23_04.swf" ' +
-       '<embed src="https://raw.githubusercontent.com/velvessences/MCDN/main/Main_20130527_172419.swf" ' +
-          'type="application/x-shockwave-flash" ' +
-          'width="1024" height="768" ' +
-          'allowscriptaccess="always" ' +
-          'allownetworking="all" ' +
-          'allowfullscreen="true" ' +
-          'wmode="direct" ' +
-          'quality="high">';
+      document.getElementById("start-screen").style.display = "none";
+
+      var container = document.getElementById("flash-container");
+      container.style.display = "block";
+
+      // Use <object> + <embed> for maximum browser compat with Ruffle / old Flash
+      container.innerHTML =
+        '<object type="application/x-shockwave-flash"' +
+        '        data="' + SWF_FILE + '"' +
+        '        width="100%" height="100%">' +
+        '  <param name="movie"           value="' + SWF_FILE + '" />' +
+        '  <param name="FlashVars"       value="' + flashVars + '" />' +
+        '  <param name="allowScriptAccess" value="always" />' +
+        '  <param name="allowNetworking" value="all" />' +
+        '  <param name="allowFullScreen" value="true" />' +
+        '  <param name="wmode"           value="direct" />' +
+        '  <param name="quality"         value="high" />' +
+        '  <embed' +
+        '    src="'              + SWF_FILE  + '"' +
+        '    type="application/x-shockwave-flash"' +
+        '    FlashVars="'        + flashVars + '"' +
+        '    allowscriptaccess="always"' +
+        '    allownetworking="all"' +
+        '    allowfullscreen="true"' +
+        '    wmode="direct"' +
+        '    quality="high"' +
+        '    width="100%" height="100%">' +
+        '  </embed>' +
+        '</object>';
     });
   </script>
+
 </body>
 </html>
